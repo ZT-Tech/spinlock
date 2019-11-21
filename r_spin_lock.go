@@ -15,9 +15,9 @@ import (
 
 // RTSpinLock re-entrant spin lock
 type RTSpinLock struct {
-	owner   int
-	counter int
-	state   int32
+	sync.Mutex
+	owner int64
+	recursion int32
 }
 
 // NewRTSpinLock instantiates a spin-lock.
@@ -27,28 +27,28 @@ func NewRTSpinLock() sync.Locker {
 
 // Lock locks sl.
 func (sl *RTSpinLock) Lock() {
-	currentID := GetGoID()
-	if sl.owner == currentID {
-		sl.counter++
+	gid := GetGoID()
+	if atomic.LoadInt64(&sl.owner) == gid {
+		sl.recursion++
 		return
 	}
-	for !sl.TryLock() {
-		runtime.Gosched()
-	}
-	sl.owner = currentID
+	m.Mutex.Lock()
+	atomic.StoreInt64(&m.owner, gid)
+	m.recursion = 1
 }
 
 // Lock locks sl.
 func (sl *RTSpinLock) Unlock() {
-	if sl.owner != GetGoID() {
-		fmt.Println("get goroutine id not eq")
-		return
+	gid := GetGoID()
+	if atomic.LoadInt64(&sl.owner) != gid {
+		panic("unlock no permission")
 	}
-	if sl.counter > 0 {
-		sl.counter--
-	} else {
-		atomic.StoreInt32(&sl.state, 0)
+	m.recursion--
+	if m.recursion != 0 {
+		return 
 	}
+  	atomic.StoreInt64(&m.owner, -1)
+  	m.Mutex.Unlock()
 }
 
 // TryLock try lock sl.
